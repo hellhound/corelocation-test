@@ -14,11 +14,16 @@
     UIWindow *window;
     UILabel *testLabel;
     CLLocationManager *locationManager; 
+    CLHeading *currentHeading;
+    CLLocation *currentLocation;
 }
 
 - (void)initializeUI;
-- (void)setOutput:(NSString *)output;
+- (void)setOutput:(NSString *)fromOutput;
+- (void)processOutputWithLocation:(CLLocation *)fromLocation
+                          heading:(CLHeading *)fromHeading;
 - (void)startStandardUpdates;
+- (void)startHeadingEvents;
 @end
 
 @implementation AppDelegate
@@ -62,17 +67,49 @@
     [window makeKeyAndVisible];
 }
 
-- (void)setOutput:(NSString *)output
+- (void)setOutput:(NSString *)fromOutput
 {
     CGSize outputSize = 
-            [output sizeWithFont:[testLabel font] constrainedToSize:
+            [fromOutput sizeWithFont:[testLabel font] constrainedToSize:
                 CGSizeMake([window frame].size.width, CGFLOAT_MAX)
                 lineBreakMode:[testLabel lineBreakMode]];
-    [testLabel setText:output];
+
+    [testLabel setText:fromOutput];
     [testLabel setFrame:CGRectMake(0, 0, outputSize.width, outputSize.height)];
-    //[testLabel sizeToFit];
     [testLabel setCenter:[window center]];
     [testLabel setNeedsLayout];
+}
+
+- (void)processOutputWithLocation:(CLLocation *)fromLocation
+                          heading:(CLHeading *)fromHeading;
+{
+    NSString *output = [NSString string];
+
+    if (fromLocation != nil) {
+        [currentLocation autorelease];
+        currentLocation = [fromLocation retain];
+    }
+    if (currentLocation != nil)
+        output = [output stringByAppendingString:
+                [NSString stringWithFormat:
+                    @"Altitude: %f Latitude: %f Longitude: %f"
+                    @" Course: %f Speed: %f",
+                    [currentLocation altitude],
+                    [currentLocation coordinate].latitude,
+                    [currentLocation coordinate].longitude,
+                    [currentLocation course],
+                    [currentLocation speed]]];
+    if (fromHeading != nil) {
+        [currentHeading autorelease];
+        currentHeading = [fromHeading retain];
+    }
+    if (currentHeading != nil)
+        output = [output stringByAppendingString:
+                [NSString stringWithFormat:@" Heading:%f",
+                    [currentHeading trueHeading] > 0 ?
+                        [currentHeading trueHeading] :
+                        [currentHeading magneticHeading]]];
+    [self setOutput:output];
 }
 
 - (void)startStandardUpdates
@@ -89,6 +126,17 @@
     }
 }
 
+- (void)startHeadingEvents
+{
+    // Create the location manager if this object does not already have one     
+    if (locationManager == nil)
+        locationManager = [[CLLocationManager alloc] init];
+    if ([CLLocationManager headingAvailable]) {
+        locationManager.headingFilter = 2;
+        [locationManager startUpdatingHeading];
+    }
+}
+
 #pragma mark -
 #pragma mark <UIApplicationDelegate>
 
@@ -97,6 +145,7 @@
 {
     [self initializeUI];
     [self startStandardUpdates];
+    [self startHeadingEvents];
     return YES;
 }
 
@@ -112,14 +161,21 @@
     didUpdateToLocation:(CLLocation *)newLocation
            fromLocation:(CLLocation *)oldLocation
 {
-    if (-[[newLocation timestamp] timeIntervalSinceNow] < 5.0) //&& 
-          //[newLocation horizontalAccuracy] <=
+    if ([newLocation horizontalAccuracy] < 0)
+        return;
+    if (-[[newLocation timestamp] timeIntervalSinceNow] < 5.0)
+          //&& [newLocation horizontalAccuracy] <=
           //    [locationManager desiredAccuracy])
-        [self setOutput:[NSString stringWithFormat:
-                @"Altitude: %f Latitude: %f Longitude: %f",
-                newLocation.altitude,
-                newLocation.coordinate.latitude,
-                newLocation.coordinate.longitude]];
+        [self processOutputWithLocation:newLocation heading:nil];
+}
+
+- (void)locationManager:(CLLocationManager *)manager
+       didUpdateHeading:(CLHeading *)newHeading
+{
+    if ([newHeading headingAccuracy] < 0)
+        return;
+    if (-[[newHeading timestamp] timeIntervalSinceNow] < 1.0)
+        [self processOutputWithLocation:nil heading:newHeading];
 }
 
 - (void)locationManager:(CLLocationManager *)manager
